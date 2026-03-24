@@ -19,15 +19,28 @@ export default function AutoShapeRenderer({ shape, style }: Props) {
   const lineColor = shape.line?.color ?? "none";
   const lineWidth = shape.line?.width ? emuToPx(shape.line.width) : 0;
 
+  const hasGradient =
+    shape.fill?.type === "gradient" &&
+    shape.fill.details?.stops &&
+    shape.fill.details.stops.length > 0;
+
   // Ellipse: use CSS border-radius
   if (isEllipse(shape.preset_geometry)) {
     const shapeStyle: CSSProperties = {
       ...style,
       borderRadius: "50%",
-      backgroundColor: shape.fill?.type === "solid" ? fillColor : undefined,
       opacity: fillOpacity,
       border: lineWidth > 0 ? `${Math.max(lineWidth, 0.5)}px solid ${lineColor}` : undefined,
     };
+
+    if (hasGradient) {
+      const stops = shape.fill!.details!.stops
+        .map((s) => `${s.color ?? "#fff"} ${s.position * 100}%`)
+        .join(", ");
+      shapeStyle.background = `linear-gradient(180deg, ${stops})`;
+    } else if (shape.fill?.type === "solid") {
+      shapeStyle.backgroundColor = fillColor;
+    }
 
     return (
       <div style={shapeStyle}>
@@ -50,6 +63,12 @@ export default function AutoShapeRenderer({ shape, style }: Props) {
 
   // SVG path-based shape
   const path = getGeometryPath(shape.preset_geometry);
+  const gradientId = `grad-${shape.id}`;
+  const svgFill = hasGradient
+    ? `url(#${gradientId})`
+    : shape.fill?.type === "solid"
+      ? fillColor
+      : "transparent";
 
   return (
     <div style={style}>
@@ -59,10 +78,23 @@ export default function AutoShapeRenderer({ shape, style }: Props) {
         height={h}
         style={{ position: "absolute", top: 0, left: 0 }}
       >
+        {hasGradient && (
+          <defs>
+            <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+              {shape.fill!.details!.stops.map((s, i) => (
+                <stop
+                  key={i}
+                  offset={`${s.position * 100}%`}
+                  stopColor={s.color ?? "#fff"}
+                />
+              ))}
+            </linearGradient>
+          </defs>
+        )}
         {path ? (
           <path
             d={scalePath(path, w, h)}
-            fill={shape.fill?.type === "solid" ? fillColor : "transparent"}
+            fill={svgFill}
             fillOpacity={fillOpacity}
             stroke={lineColor}
             strokeWidth={Math.max(lineWidth, 0)}
@@ -71,7 +103,7 @@ export default function AutoShapeRenderer({ shape, style }: Props) {
           <rect
             x={lineWidth / 2} y={lineWidth / 2}
             width={w - lineWidth} height={h - lineWidth}
-            fill={shape.fill?.type === "solid" ? fillColor : "transparent"}
+            fill={svgFill}
             fillOpacity={fillOpacity}
             stroke={lineColor}
             strokeWidth={lineWidth}
