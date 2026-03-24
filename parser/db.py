@@ -4,9 +4,9 @@ import sqlite3
 from pathlib import Path
 
 SCHEMA_SQL = """
--- Presentation metadata
+-- Presentation metadata (db_no is the unique external identifier / PK)
 CREATE TABLE IF NOT EXISTS presentations (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    db_no         INTEGER PRIMARY KEY,
     filename      TEXT NOT NULL,
     slide_width   INTEGER NOT NULL,   -- EMU (1 inch = 914400)
     slide_height  INTEGER NOT NULL,   -- EMU
@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS presentations (
 -- Theme colors and fonts
 CREATE TABLE IF NOT EXISTS themes (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    presentation_id INTEGER NOT NULL REFERENCES presentations(id),
+    presentation_id INTEGER NOT NULL REFERENCES presentations(db_no),
     name            TEXT,
     clr_dk1     TEXT, clr_lt1     TEXT,
     clr_dk2     TEXT, clr_lt2     TEXT,
@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS themes (
 -- Slide masters
 CREATE TABLE IF NOT EXISTS slide_masters (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    presentation_id INTEGER NOT NULL REFERENCES presentations(id),
+    presentation_id INTEGER NOT NULL REFERENCES presentations(db_no),
     theme_id        INTEGER REFERENCES themes(id),
     name            TEXT,
     bg_fill_type    TEXT,
@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS slide_layouts (
 -- Slides
 CREATE TABLE IF NOT EXISTS slides (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    presentation_id INTEGER NOT NULL REFERENCES presentations(id),
+    presentation_id INTEGER NOT NULL REFERENCES presentations(db_no),
     slide_layout_id INTEGER REFERENCES slide_layouts(id),
     slide_number    INTEGER NOT NULL,
     name            TEXT,
@@ -103,6 +103,12 @@ CREATE TABLE IF NOT EXISTS shapes (
     line_width      INTEGER,
     line_dash_style TEXT,
     line_opacity    REAL,
+    line_head_type  TEXT,
+    line_head_w     TEXT,
+    line_head_len   TEXT,
+    line_tail_type  TEXT,
+    line_tail_w     TEXT,
+    line_tail_len   TEXT,
 
     shadow_json     TEXT,
 
@@ -117,7 +123,8 @@ CREATE TABLE IF NOT EXISTS shapes (
     group_ch_ext_cx INTEGER, group_ch_ext_cy INTEGER,
 
     hyperlink_url TEXT,
-    raw_xml_snippet TEXT
+    raw_xml_snippet TEXT,
+    chart_json TEXT
 );
 
 -- Text frames
@@ -205,10 +212,20 @@ CREATE TABLE IF NOT EXISTS table_cells (
     text_frame_id   INTEGER REFERENCES text_frames(id)
 );
 
+-- Slide capture images (high-quality rendered snapshots)
+CREATE TABLE IF NOT EXISTS slide_images (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    slide_id        INTEGER NOT NULL UNIQUE REFERENCES slides(id),
+    content_type    TEXT NOT NULL DEFAULT 'image/png',
+    width           INTEGER,
+    height          INTEGER,
+    data            BLOB NOT NULL
+);
+
 -- Media (images as BLOBs)
 CREATE TABLE IF NOT EXISTS media (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    presentation_id INTEGER NOT NULL REFERENCES presentations(id),
+    presentation_id INTEGER NOT NULL REFERENCES presentations(db_no),
     filename        TEXT,
     content_type    TEXT,
     sha1            TEXT,
@@ -222,6 +239,7 @@ CREATE INDEX IF NOT EXISTS idx_paragraphs_tf ON paragraphs(text_frame_id);
 CREATE INDEX IF NOT EXISTS idx_runs_paragraph ON runs(paragraph_id);
 CREATE INDEX IF NOT EXISTS idx_table_cells_shape ON table_cells(shape_id);
 CREATE INDEX IF NOT EXISTS idx_slides_presentation ON slides(presentation_id);
+-- db_no is PK so no separate index needed
 """
 
 

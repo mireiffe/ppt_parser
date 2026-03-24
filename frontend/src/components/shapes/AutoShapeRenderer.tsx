@@ -1,4 +1,4 @@
-import type { Shape } from "../../api/types";
+import type { Shape, Shadow } from "../../api/types";
 import { emuToPx } from "../../utils/emu";
 import { getGeometryPath, isEllipse } from "../../utils/geometry";
 import ParagraphRenderer from "../text/ParagraphRenderer";
@@ -7,6 +7,36 @@ import type { CSSProperties } from "react";
 interface Props {
   shape: Shape;
   style: CSSProperties;
+}
+
+/** Convert shadow data to CSS box-shadow or drop-shadow */
+function shadowOffsets(shadow: Shadow): { offX: number; offY: number; blur: number; rgba: string } {
+  const blur = shadow.blur_radius ? emuToPx(shadow.blur_radius) : 4;
+  const dist = shadow.distance ? emuToPx(shadow.distance) : 3;
+  // OOXML direction: clockwise from positive X axis, in 60000ths of a degree
+  // 0 = right, 5400000 = down, 10800000 = left, 16200000 = up
+  const dirDeg = shadow.direction ? shadow.direction / 60000 : 90;
+  const dirRad = dirDeg * (Math.PI / 180);
+  const offX = Math.round(dist * Math.cos(dirRad) * 10) / 10;
+  const offY = Math.round(dist * Math.sin(dirRad) * 10) / 10;
+  const color = shadow.color ? `#${shadow.color}` : "#000000";
+  const alpha = shadow.alpha ?? 0.4;
+  const r = parseInt(color.slice(1, 3), 16);
+  const g = parseInt(color.slice(3, 5), 16);
+  const b = parseInt(color.slice(5, 7), 16);
+  return { offX, offY, blur, rgba: `rgba(${r},${g},${b},${alpha})` };
+}
+
+function shadowToBoxShadow(shadow: Shadow | null | undefined): string | undefined {
+  if (!shadow || shadow.style !== "OUTER") return undefined;
+  const { offX, offY, blur, rgba } = shadowOffsets(shadow);
+  return `${offX}px ${offY}px ${blur}px ${rgba}`;
+}
+
+function shadowToDropShadow(shadow: Shadow | null | undefined): string | undefined {
+  if (!shadow || shadow.style !== "OUTER") return undefined;
+  const { offX, offY, blur, rgba } = shadowOffsets(shadow);
+  return `drop-shadow(${offX}px ${offY}px ${blur}px ${rgba})`;
 }
 
 export default function AutoShapeRenderer({ shape, style }: Props) {
@@ -18,6 +48,8 @@ export default function AutoShapeRenderer({ shape, style }: Props) {
   const fillOpacity = shape.fill?.opacity ?? 1;
   const lineColor = shape.line?.color ?? "none";
   const lineWidth = shape.line?.width ? emuToPx(shape.line.width) : 0;
+  const boxShadow = shadowToBoxShadow(shape.shadow);
+  const dropShadow = shadowToDropShadow(shape.shadow);
 
   const hasGradient =
     shape.fill?.type === "gradient" &&
@@ -31,6 +63,7 @@ export default function AutoShapeRenderer({ shape, style }: Props) {
       borderRadius: "50%",
       opacity: fillOpacity,
       border: lineWidth > 0 ? `${Math.max(lineWidth, 0.5)}px solid ${lineColor}` : undefined,
+      boxShadow,
     };
 
     if (hasGradient) {
@@ -71,7 +104,7 @@ export default function AutoShapeRenderer({ shape, style }: Props) {
       : "transparent";
 
   return (
-    <div style={style}>
+    <div style={{ ...style, filter: dropShadow }}>
       <svg
         viewBox={`0 0 ${w} ${h}`}
         width={w}

@@ -46,7 +46,8 @@ def _extract_background(bg) -> dict:
 
 
 def parse_slide_masters(prs: Presentation, pres_id: int,
-                        theme_data: dict, conn: sqlite3.Connection) -> dict:
+                        theme_data: dict, conn: sqlite3.Connection,
+                        image_store: "ImageStore | None" = None) -> dict:
     """
     Parse slide masters and layouts.
     Returns mapping: {slide_layout_obj_id: (layout_db_id, master_db_id, theme_colors)}.
@@ -66,6 +67,15 @@ def parse_slide_masters(prs: Presentation, pres_id: int,
             **bg,
         })
 
+        # Parse non-placeholder shapes from master
+        for z_idx, ms_shape in enumerate(master.shapes):
+            if not ms_shape.is_placeholder:
+                parse_shape(
+                    ms_shape, conn, image_store, theme_colors,
+                    slide_master_id=master_db_id,
+                    z_order=z_idx,
+                )
+
         for layout in master.slide_layouts:
             layout_bg = _extract_background(layout.background)
             layout_db_id = insert_row(conn, "slide_layouts", {
@@ -75,6 +85,15 @@ def parse_slide_masters(prs: Presentation, pres_id: int,
                 **layout_bg,
             })
             layout_map[id(layout)] = (layout_db_id, master_db_id, theme_colors)
+
+            # Parse non-placeholder shapes from layout
+            for z_idx, ls_shape in enumerate(layout.shapes):
+                if not ls_shape.is_placeholder:
+                    parse_shape(
+                        ls_shape, conn, image_store, theme_colors,
+                        slide_layout_id=layout_db_id,
+                        z_order=z_idx,
+                    )
 
     return layout_map
 

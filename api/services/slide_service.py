@@ -171,11 +171,19 @@ def _build_shape(shape_row, conn: sqlite3.Connection) -> dict:
 
     # Line
     line = None
-    if shape["line_color"] or shape["line_width"]:
+    has_line = shape["line_color"] or shape["line_width"]
+    has_arrows = shape.get("line_head_type") or shape.get("line_tail_type")
+    if has_line or has_arrows:
         line = {
             "color": shape["line_color"],
             "width": shape["line_width"],
             "dash_style": shape["line_dash_style"],
+            "head_type": shape.get("line_head_type"),
+            "head_w": shape.get("line_head_w"),
+            "head_len": shape.get("line_head_len"),
+            "tail_type": shape.get("line_tail_type"),
+            "tail_w": shape.get("line_tail_w"),
+            "tail_len": shape.get("line_tail_len"),
         }
 
     # Shadow
@@ -226,6 +234,10 @@ def _build_shape(shape_row, conn: sqlite3.Connection) -> dict:
         "hyperlink_url": shape["hyperlink_url"],
     }
 
+    # Chart-specific
+    if shape["shape_type"] == "chart" and shape["chart_json"]:
+        result["chart"] = json.loads(shape["chart_json"])
+
     # Picture-specific
     if shape["shape_type"] == "picture" and shape["media_id"]:
         result["media_url"] = f"/api/media/{shape['media_id']}"
@@ -269,17 +281,41 @@ def get_slide_data(slide_id: int, conn: sqlite3.Connection) -> dict | None:
     ).fetchone()
     notes = notes_row["text"] if notes_row else None
 
+    # Get master/layout shapes (non-placeholder, to render behind slide content)
+    master_shapes = []
+    if slide["slide_layout_id"]:
+        layout = conn.execute(
+            "SELECT * FROM slide_layouts WHERE id = ?", (slide["slide_layout_id"],)
+        ).fetchone()
+        if layout:
+            master_id = layout["slide_master_id"]
+            # Master shapes
+            if master_id:
+                ms = conn.execute(
+                    "SELECT * FROM shapes WHERE slide_master_id = ? AND parent_group_id IS NULL ORDER BY z_order",
+                    (master_id,)
+                ).fetchall()
+                master_shapes.extend(ms)
+            # Layout shapes
+            ls = conn.execute(
+                "SELECT * FROM shapes WHERE slide_layout_id = ? AND parent_group_id IS NULL ORDER BY z_order",
+                (slide["slide_layout_id"],)
+            ).fetchall()
+            master_shapes.extend(ls)
+
     # Get top-level shapes (no parent group)
     shapes = conn.execute(
         "SELECT * FROM shapes WHERE slide_id = ? AND parent_group_id IS NULL ORDER BY z_order",
         (slide_id,)
     ).fetchall()
 
-    shape_list = [_build_shape(s, conn) for s in shapes]
+    # Master/layout shapes first (rendered behind), then slide shapes
+    all_shapes = list(master_shapes) + list(shapes)
+    shape_list = [_build_shape(s, conn) for s in all_shapes]
 
     # Get presentation dimensions
     pres = conn.execute(
-        "SELECT slide_width, slide_height FROM presentations WHERE id = ?",
+        "SELECT slide_width, slide_height FROM presentations WHERE db_no = ?",
         (slide["presentation_id"],)
     ).fetchone()
 

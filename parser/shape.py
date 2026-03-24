@@ -9,7 +9,7 @@ from .color import hex_from_rgb, resolve_color
 from .db import insert_row
 from .image import ImageStore
 from .text import parse_text_frame
-from .xml_util import get_flip
+from .xml_util import get_flip, get_line_ends, get_shadow_from_xml, get_fill_alpha
 
 
 def _extract_fill(shape) -> dict:
@@ -53,12 +53,23 @@ def _extract_fill(shape) -> dict:
             result["fill_type"] = "no_fill"
     except Exception:
         pass
+    # Extract fill alpha/transparency from XML
+    try:
+        alpha = get_fill_alpha(shape)
+        if alpha is not None:
+            result["fill_opacity"] = alpha
+    except Exception:
+        pass
     return result
 
 
 def _extract_line(shape) -> dict:
-    """Extract line/outline properties."""
-    result = {"line_color": None, "line_width": None, "line_dash_style": None, "line_opacity": None}
+    """Extract line/outline properties including arrow heads."""
+    result = {
+        "line_color": None, "line_width": None, "line_dash_style": None, "line_opacity": None,
+        "line_head_type": None, "line_head_w": None, "line_head_len": None,
+        "line_tail_type": None, "line_tail_w": None, "line_tail_len": None,
+    }
     try:
         line = shape.line
         if line is None:
@@ -74,12 +85,23 @@ def _extract_line(shape) -> dict:
             result["line_dash_style"] = line.dash_style.name
     except Exception:
         pass
+    # Arrow head/tail from XML
+    try:
+        ends = get_line_ends(shape)
+        result.update(ends)
+    except Exception:
+        pass
     return result
 
 
 def _extract_shadow(shape) -> str | None:
     """Extract shadow properties as JSON string."""
     try:
+        # Try XML-based extraction first (more detailed)
+        data = get_shadow_from_xml(shape)
+        if data:
+            return json.dumps(data)
+        # Fallback to python-pptx API
         shadow = shape.shadow
         if shadow is None:
             return None
@@ -283,7 +305,11 @@ def parse_shape(shape, conn: sqlite3.Connection, image_store: ImageStore,
 
     # Hyperlink
     hyperlink_url = None
-    if hasattr(shape, "click_action") and shape.click_action:
+    try:
+        has_click = hasattr(shape, "click_action") and shape.click_action
+    except TypeError:
+        has_click = False
+    if has_click:
         try:
             hyperlink_url = shape.click_action.hyperlink.address
         except Exception:

@@ -77,6 +77,90 @@ def get_group_child_transform(shape) -> tuple[int | None, int | None, int | None
     )
 
 
+def get_line_ends(shape) -> dict:
+    """Extract head/tail end properties from a:ln/a:headEnd and a:ln/a:tailEnd."""
+    result = {
+        "line_head_type": None, "line_head_w": None, "line_head_len": None,
+        "line_tail_type": None, "line_tail_w": None, "line_tail_len": None,
+    }
+    sp = shape._element
+    head_list = xpath(sp, ".//a:ln/a:headEnd")
+    tail_list = xpath(sp, ".//a:ln/a:tailEnd")
+    if head_list:
+        h = head_list[0]
+        t = h.get("type")
+        if t and t != "none":
+            result["line_head_type"] = t
+            result["line_head_w"] = h.get("w", "med")
+            result["line_head_len"] = h.get("len", "med")
+    if tail_list:
+        t = tail_list[0]
+        tt = t.get("type")
+        if tt and tt != "none":
+            result["line_tail_type"] = tt
+            result["line_tail_w"] = t.get("w", "med")
+            result["line_tail_len"] = t.get("len", "med")
+    return result
+
+
+def get_shadow_from_xml(shape) -> dict | None:
+    """Extract shadow properties directly from XML effectLst/outerShdw."""
+    sp = shape._element
+    outer_list = xpath(sp, ".//a:effectLst/a:outerShdw")
+    if not outer_list:
+        return None
+    o = outer_list[0]
+    blur_rad = o.get("blurRad")
+    dist = o.get("dist")
+    direction = o.get("dir")
+
+    # Extract color and alpha
+    color = None
+    alpha = None
+    for child in o:
+        tag = child.tag.split("}")[-1] if "}" in child.tag else child.tag
+        if tag == "srgbClr":
+            color = child.get("val")
+            alpha_els = xpath(child, "a:alpha")
+            if alpha_els:
+                alpha = alpha_els[0].get("val")
+        elif tag == "schemeClr":
+            # We'd need theme resolution here; use black as fallback
+            color = "000000"
+            alpha_els = xpath(child, "a:alpha")
+            if alpha_els:
+                alpha = alpha_els[0].get("val")
+
+    data = {"style": "OUTER"}
+    if blur_rad:
+        data["blur_radius"] = int(blur_rad)
+    if dist:
+        data["distance"] = int(dist)
+    if direction:
+        data["direction"] = int(direction)
+    if color:
+        data["color"] = color
+    if alpha:
+        # alpha is in 1/1000 percent, e.g. "40000" = 40%
+        data["alpha"] = int(alpha) / 100000.0
+    return data
+
+
+def get_fill_alpha(shape) -> float | None:
+    """Extract fill transparency/alpha from XML."""
+    sp = shape._element
+    nsmap = {"a": "http://schemas.openxmlformats.org/drawingml/2006/main"}
+    # Check solidFill alpha
+    solid = sp.findall(".//a:spPr/a:solidFill", nsmap)
+    for s in solid:
+        alpha_els = s.findall(".//a:alpha", nsmap)
+        if alpha_els:
+            val = alpha_els[0].get("val")
+            if val:
+                return int(val) / 100000.0
+    return None
+
+
 def get_text_direction(shape) -> str | None:
     """Extract text direction (vert attribute) from bodyPr."""
     sp = shape._element

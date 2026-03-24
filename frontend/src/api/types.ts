@@ -66,11 +66,21 @@ export interface Line {
   color: string | null;
   width: number | null;
   dash_style: string | null;
+  head_type?: string | null;
+  head_w?: string | null;
+  head_len?: string | null;
+  tail_type?: string | null;
+  tail_w?: string | null;
+  tail_len?: string | null;
 }
 
 export interface Shadow {
   style: string;
   blur_radius?: number;
+  distance?: number;
+  direction?: number;
+  color?: string;
+  alpha?: number;
 }
 
 export interface TextFrame {
@@ -137,6 +147,10 @@ export interface TableCell {
   fill_type: string | null;
   fill_color: string | null;
   vertical_anchor: string | null;
+  margin_left: number | null;
+  margin_right: number | null;
+  margin_top: number | null;
+  margin_bottom: number | null;
   borders: {
     left: { color: string | null; width: number | null };
     right: { color: string | null; width: number | null };

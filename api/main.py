@@ -1,6 +1,7 @@
 """FastAPI application entry point."""
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -11,6 +12,11 @@ from .database import set_db_path
 from .routers import presentations, slides, media
 
 app = FastAPI(title="PPTX Viewer API")
+
+# Auto-set DB path from environment variable (useful for uvicorn --reload)
+_env_db = os.environ.get("PPTX_DB_PATH")
+if _env_db:
+    set_db_path(_env_db)
 
 app.add_middleware(
     CORSMiddleware,
