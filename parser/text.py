@@ -4,9 +4,9 @@ import sqlite3
 
 from pptx.util import Emu, Pt
 
-from .color import resolve_color
+from .color import resolve_color, hex_from_rgb
 from .db import insert_row
-from .xml_util import get_text_direction
+from .xml_util import get_text_direction, xpath, NSMAP
 
 
 def _emu_or_none(val) -> int | None:
@@ -24,6 +24,65 @@ def _font_size_centipoints(font) -> int | None:
     # font.size is a Length in EMU; convert to centi-points
     # 1 pt = 12700 EMU, centi-points = size_emu / 12700 * 100 = size_emu / 127
     return round(int(size) / 127)
+
+
+def _extract_defRPr(pPr) -> dict:
+    """Extract default run properties from paragraph's defRPr element.
+
+    Returns dict with keys: font_name, font_size, font_bold, font_italic,
+    font_color. Values are None if not specified.
+    """
+    defaults = {
+        "font_name": None,
+        "font_size": None,
+        "font_bold": None,
+        "font_italic": None,
+        "font_color": None,
+    }
+    if pPr is None:
+        return defaults
+
+    defRPr_elems = xpath(pPr, "a:defRPr")
+    if not defRPr_elems:
+        return defaults
+    defRPr = defRPr_elems[0]
+
+    # Font size: sz attr in hundredths of a point → centi-points
+    sz = defRPr.get("sz")
+    if sz:
+        defaults["font_size"] = int(sz)  # already in hundredths of pt = centi-points
+
+    # Bold
+    b = defRPr.get("b")
+    if b is not None:
+        defaults["font_bold"] = b == "1"
+
+    # Italic
+    i = defRPr.get("i")
+    if i is not None:
+        defaults["font_italic"] = i == "1"
+
+    # Font name from latin typeface
+    latin = xpath(defRPr, "a:latin")
+    if latin:
+        tf = latin[0].get("typeface")
+        if tf:
+            defaults["font_name"] = tf
+
+    # Color from solidFill
+    srgb = xpath(defRPr, "a:solidFill/a:srgbClr")
+    if srgb:
+        val = srgb[0].get("val", "")
+        if len(val) == 6:
+            defaults["font_color"] = f"#{val.upper()}"
+    else:
+        # Check for scheme color
+        schm = xpath(defRPr, "a:solidFill/a:schemeClr")
+        if schm:
+            # Store scheme color name for potential resolution
+            defaults["_scheme_clr"] = schm[0].get("val")
+
+    return defaults
 
 
 def _line_spacing_value(para) -> tuple[float | None, str | None]:
@@ -112,6 +171,9 @@ def _parse_paragraph(para, p_idx: int, tf_id: int, conn: sqlite3.Connection,
             if raw:
                 bullet_size_pct = int(raw) / 1000  # stored as thousandths of percent
 
+    # Extract default run properties from defRPr
+    def_rpr = _extract_defRPr(pf)
+
     para_id = insert_row(conn, "paragraphs", {
         "text_frame_id": tf_id,
         "paragraph_index": p_idx,
@@ -129,36 +191,81 @@ def _parse_paragraph(para, p_idx: int, tf_id: int, conn: sqlite3.Connection,
         "margin_left": _emu_or_none(para.margin_left) if hasattr(para, "margin_left") else None,
     })
 
-    for r_idx, run in enumerate(para.runs):
-        _parse_run(run, r_idx, para_id, conn, theme_colors)
+    # Iterate XML children to handle both <a:r> runs and <a:br/> line breaks
+    a_ns = NSMAP["a"]
+    p_elem = para._p  # the underlying XML <a:p> element
+    r_idx = 0
+    run_iter = iter(para.runs)
+    for child in p_elem:
+        tag = child.tag
+        if tag == f"{{{a_ns}}}r":
+            # Regular text run
+            run = next(run_iter, None)
+            if run:
+                _parse_run(run, r_idx, para_id, conn, theme_colors, def_rpr)
+                r_idx += 1
+        elif tag == f"{{{a_ns}}}br":
+            # Line break
+            insert_row(conn, "runs", {
+                "paragraph_id": para_id,
+                "run_index": r_idx,
+                "text": "",
+                "is_line_break": True,
+                # Apply defRPr defaults for consistency
+                "font_name": def_rpr.get("font_name"),
+                "font_size": def_rpr.get("font_size"),
+                "font_bold": def_rpr.get("font_bold"),
+                "font_italic": def_rpr.get("font_italic"),
+                "font_color": def_rpr.get("font_color"),
+            })
+            r_idx += 1
 
-    # Handle line breaks within paragraph (they appear as <a:br/> between runs)
-    # python-pptx includes them in runs, but if paragraph has no runs and just text,
-    # we still need at least one run entry
-    if not para.runs and para.text:
+    # If no children produced runs (empty paragraph with text), add fallback
+    if r_idx == 0 and para.text:
         insert_row(conn, "runs", {
             "paragraph_id": para_id,
             "run_index": 0,
             "text": para.text,
+            "font_name": def_rpr.get("font_name"),
+            "font_size": def_rpr.get("font_size"),
+            "font_bold": def_rpr.get("font_bold"),
+            "font_italic": def_rpr.get("font_italic"),
+            "font_color": def_rpr.get("font_color"),
         })
 
 
 def _parse_run(run, r_idx: int, para_id: int, conn: sqlite3.Connection,
-               theme_colors: dict | None = None):
-    """Parse a single text run."""
+               theme_colors: dict | None = None, def_rpr: dict | None = None):
+    """Parse a single text run, applying defRPr defaults for missing values."""
     font = run.font
     font_color, font_color_theme, brightness = resolve_color(
         font.color, theme_colors
     )
+    if def_rpr is None:
+        def_rpr = {}
+
+    # Apply defRPr defaults for properties not set on the run
+    font_name = font.name or def_rpr.get("font_name")
+    font_size = _font_size_centipoints(font)
+    if font_size is None:
+        font_size = def_rpr.get("font_size")
+    font_bold = font.bold
+    if font_bold is None:
+        font_bold = def_rpr.get("font_bold")
+    font_italic = font.italic
+    if font_italic is None:
+        font_italic = def_rpr.get("font_italic")
+    if font_color is None:
+        font_color = def_rpr.get("font_color")
 
     insert_row(conn, "runs", {
         "paragraph_id": para_id,
         "run_index": r_idx,
         "text": run.text,
-        "font_name": font.name,
-        "font_size": _font_size_centipoints(font),
-        "font_bold": font.bold,
-        "font_italic": font.italic,
+        "font_name": font_name,
+        "font_size": font_size,
+        "font_bold": font_bold,
+        "font_italic": font_italic,
         "font_underline": font.underline.name if font.underline and font.underline is not True else (
             "SINGLE" if font.underline is True else None
         ),

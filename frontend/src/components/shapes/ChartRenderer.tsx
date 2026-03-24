@@ -4,6 +4,7 @@ import {
   Chart as ChartJS,
   CategoryScale,
   LinearScale,
+  RadialLinearScale,
   BarElement,
   LineElement,
   PointElement,
@@ -12,11 +13,12 @@ import {
   Tooltip,
   Legend,
 } from "chart.js";
-import { Bar, Line, Pie, Doughnut, Scatter } from "react-chartjs-2";
+import { Bar, Line, Pie, Doughnut, Scatter, Radar } from "react-chartjs-2";
 
 ChartJS.register(
   CategoryScale,
   LinearScale,
+  RadialLinearScale,
   BarElement,
   LineElement,
   PointElement,
@@ -44,11 +46,22 @@ const PALETTE = [
   "#EB6B0A",
 ];
 
+function seriesColor(i: number, color?: string): string {
+  return color ?? PALETTE[i % PALETTE.length];
+}
+
 function alphaColor(hex: string, alpha: number): string {
   const r = parseInt(hex.slice(1, 3), 16);
   const g = parseInt(hex.slice(3, 5), 16);
   const b = parseInt(hex.slice(5, 7), 16);
   return `rgba(${r},${g},${b},${alpha})`;
+}
+
+function legendPosition(pos: string | null | undefined): "top" | "bottom" | "left" | "right" {
+  if (pos === "top") return "top";
+  if (pos === "left") return "left";
+  if (pos === "right") return "right";
+  return "bottom";
 }
 
 const chartInner: CSSProperties = {
@@ -72,14 +85,20 @@ export default function ChartRenderer({ shape, style }: Props) {
   const isScatter = ct.startsWith("xy_scatter") || ct === "scatter";
   const isColumn = ct.startsWith("column");
   const isStacked = ct.includes("stacked");
+  const isRadar = ct.startsWith("radar");
+  const isWaterfall = ct.startsWith("waterfall");
+  const isCombo = ct.includes("combo");
+
+  const showLegend = chart.series.length > 1 || isPie || isDoughnut;
+  const legPos = legendPosition(chart.legend_position);
 
   const commonOptions = {
     responsive: true,
     maintainAspectRatio: false,
     plugins: {
       legend: {
-        display: chart.series.length > 1 || isPie || isDoughnut,
-        position: "bottom" as const,
+        display: showLegend,
+        position: legPos,
         labels: { font: { size: 11 } },
       },
       title: {
@@ -93,12 +112,15 @@ export default function ChartRenderer({ shape, style }: Props) {
 
   // Pie / Doughnut
   if (isPie || isDoughnut) {
+    const colors = chart.series[0]?.values.map((_, i) => seriesColor(i, chart.series[0]?.color));
+    // For pie/doughnut, use palette colors per slice (not per series)
+    const sliceColors = chart.series[0]?.values.map((_, i) => PALETTE[i % PALETTE.length]);
     const data = {
       labels: chart.categories,
       datasets: chart.series.map((s) => ({
         label: s.name ?? "",
         data: s.values,
-        backgroundColor: s.values.map((_, i) => PALETTE[i % PALETTE.length]),
+        backgroundColor: sliceColors,
         borderWidth: 1,
       })),
     };
@@ -115,16 +137,20 @@ export default function ChartRenderer({ shape, style }: Props) {
   // Scatter
   if (isScatter) {
     const data = {
-      datasets: chart.series.map((s, i) => ({
-        label: s.name ?? `Series ${i + 1}`,
-        data: (s.x_values ?? s.values).map((x, j) => ({
-          x: s.x_values ? x : j,
-          y: s.values[j],
-        })),
-        backgroundColor: alphaColor(PALETTE[i % PALETTE.length], 0.6),
-        borderColor: PALETTE[i % PALETTE.length],
-        pointRadius: 4,
-      })),
+      datasets: chart.series.map((s, i) => {
+        const c = seriesColor(i, s.color);
+        const xVals = s.x_values;
+        return {
+          label: s.name ?? `Series ${i + 1}`,
+          data: s.values.map((y, j) => ({
+            x: xVals && xVals[j] != null ? xVals[j] : j,
+            y,
+          })),
+          backgroundColor: alphaColor(c, 0.6),
+          borderColor: c,
+          pointRadius: 4,
+        };
+      }),
     };
     return (
       <div style={style}>
@@ -135,21 +161,55 @@ export default function ChartRenderer({ shape, style }: Props) {
     );
   }
 
+  // Radar
+  if (isRadar) {
+    const data = {
+      labels: chart.categories,
+      datasets: chart.series.map((s, i) => {
+        const c = seriesColor(i, s.color);
+        return {
+          label: s.name ?? `Series ${i + 1}`,
+          data: s.values,
+          backgroundColor: alphaColor(c, 0.2),
+          borderColor: c,
+          pointBackgroundColor: c,
+          borderWidth: 2,
+        };
+      }),
+    };
+    return (
+      <div style={style}>
+        <div style={chartInner}>
+          <Radar
+            data={data}
+            options={{
+              ...commonOptions,
+              scales: {
+                r: { beginAtZero: true },
+              },
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+
   // Line / Area
   if (isLine || isArea) {
     const data = {
       labels: chart.categories,
-      datasets: chart.series.map((s, i) => ({
-        label: s.name ?? `Series ${i + 1}`,
-        data: s.values,
-        borderColor: PALETTE[i % PALETTE.length],
-        backgroundColor: isArea
-          ? alphaColor(PALETTE[i % PALETTE.length], 0.4)
-          : "transparent",
-        fill: isArea,
-        tension: 0.1,
-        pointRadius: ct.includes("marker") ? 4 : 2,
-      })),
+      datasets: chart.series.map((s, i) => {
+        const c = seriesColor(i, s.color);
+        return {
+          label: s.name ?? `Series ${i + 1}`,
+          data: s.values,
+          borderColor: c,
+          backgroundColor: isArea ? alphaColor(c, 0.4) : "transparent",
+          fill: isArea,
+          tension: 0.1,
+          pointRadius: ct.includes("marker") ? 4 : 2,
+        };
+      }),
     };
     return (
       <div style={style}>
@@ -172,13 +232,16 @@ export default function ChartRenderer({ shape, style }: Props) {
   // Bar (horizontal) or Column (vertical) - default
   const data = {
     labels: chart.categories,
-    datasets: chart.series.map((s, i) => ({
-      label: s.name ?? `Series ${i + 1}`,
-      data: s.values,
-      backgroundColor: alphaColor(PALETTE[i % PALETTE.length], 0.85),
-      borderColor: PALETTE[i % PALETTE.length],
-      borderWidth: 1,
-    })),
+    datasets: chart.series.map((s, i) => {
+      const c = seriesColor(i, s.color);
+      return {
+        label: s.name ?? `Series ${i + 1}`,
+        data: s.values,
+        backgroundColor: alphaColor(c, 0.85),
+        borderColor: c,
+        borderWidth: 1,
+      };
+    }),
   };
 
   return (

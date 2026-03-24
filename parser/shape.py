@@ -123,6 +123,8 @@ def _shape_type_str(shape) -> str:
         if st == MSO_SHAPE_TYPE.FREEFORM:
             return "freeform"
         return "connector"
+    if st == MSO_SHAPE_TYPE.CHART:
+        return "chart"
     if st == MSO_SHAPE_TYPE.AUTO_SHAPE:
         return "shape"
     if st == MSO_SHAPE_TYPE.PLACEHOLDER:
@@ -131,6 +133,90 @@ def _shape_type_str(shape) -> str:
             return "textbox"
         return "shape"
     return "shape"
+
+
+def _extract_series_color(series) -> str | None:
+    """Extract the fill color of a chart series as hex string."""
+    try:
+        fmt = series.format
+        if fmt and fmt.fill and fmt.fill.type is not None:
+            rgb = fmt.fill.fore_color.rgb
+            return hex_from_rgb(rgb)
+    except Exception:
+        pass
+    return None
+
+
+def _extract_chart_data(shape) -> str | None:
+    """Extract chart data as JSON string from a chart shape."""
+    try:
+        if not hasattr(shape, "has_chart") or not shape.has_chart:
+            return None
+        chart = shape.chart
+        chart_type_raw = str(chart.chart_type)
+        # Normalize chart type name: "COLUMN_CLUSTERED (51)" -> "column_clustered"
+        chart_type = chart_type_raw.split("(")[0].strip().lower().replace(" ", "_")
+
+        # Title
+        title = None
+        try:
+            if chart.has_title:
+                title = chart.chart_title.text_frame.text
+        except Exception:
+            pass
+
+        # Legend position
+        legend_position = None
+        try:
+            if chart.has_legend:
+                legend_position = chart.legend.position.name.lower()
+        except Exception:
+            pass
+
+        # Series
+        series_list = []
+        for series in chart.series:
+            s_data = {
+                "name": series.name if hasattr(series, "name") else None,
+                "values": [v if v is not None else 0 for v in series.values],
+            }
+            # Extract series color
+            color = _extract_series_color(series)
+            if color:
+                s_data["color"] = color
+            # For scatter charts, extract x values from XML
+            try:
+                ser_el = series._element
+                ns = {"c": "http://schemas.openxmlformats.org/drawingml/2006/chart"}
+                x_val = ser_el.findall(".//c:xVal//c:pt", ns)
+                if x_val:
+                    x_vals = []
+                    for pt in x_val:
+                        v_el = pt.find("c:v", ns)
+                        x_vals.append(float(v_el.text) if v_el is not None else 0)
+                    s_data["x_values"] = x_vals
+            except Exception:
+                pass
+            series_list.append(s_data)
+
+        # Categories
+        categories = []
+        try:
+            plot = chart.plots[0]
+            categories = [str(c) for c in plot.categories]
+        except Exception:
+            pass
+
+        data = {
+            "chart_type": chart_type,
+            "title": title,
+            "categories": categories,
+            "series": series_list,
+            "legend_position": legend_position,
+        }
+        return json.dumps(data, ensure_ascii=False)
+    except Exception:
+        return None
 
 
 def parse_shape(shape, conn: sqlite3.Connection, image_store: ImageStore,
@@ -190,6 +276,11 @@ def parse_shape(shape, conn: sqlite3.Connection, image_store: ImageStore,
         group_ch_off_x, group_ch_off_y, group_ch_ext_cx, group_ch_ext_cy = \
             get_group_child_transform(shape)
 
+    # Chart data
+    chart_json = None
+    if shape_type == "chart":
+        chart_json = _extract_chart_data(shape)
+
     # Hyperlink
     hyperlink_url = None
     if hasattr(shape, "click_action") and shape.click_action:
@@ -234,6 +325,7 @@ def parse_shape(shape, conn: sqlite3.Connection, image_store: ImageStore,
         "group_ch_ext_cy": group_ch_ext_cy,
         "hyperlink_url": hyperlink_url,
         "raw_xml_snippet": None,
+        "chart_json": chart_json,
     })
 
     # Parse text frame if present

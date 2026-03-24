@@ -1,5 +1,5 @@
 export interface PresentationSummary {
-  id: number;
+  db_no: number;
   filename: string;
   slide_width: number;
   slide_height: number;
@@ -176,9 +176,25 @@ export interface Shape {
   hyperlink_url: string | null;
   media_url?: string;
   crop?: CropData;
+  chart?: ChartData;
   begin_x?: number;
   begin_y?: number;
   end_x?: number;
   end_y?: number;
   group_transform?: GroupTransform;
+}
+
+export interface ChartSeries {
+  name: string | null;
+  values: number[];
+  x_values?: number[];
+  color?: string;
+}
+
+export interface ChartData {
+  chart_type: string;
+  title: string | null;
+  categories: string[];
+  series: ChartSeries[];
+  legend_position?: string | null;
 }
