@@ -31,8 +31,8 @@ export default function PresentationList({ onSelect }: Props) {
         <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
           {presentations.map((p) => (
             <div
-              key={p.id}
-              onClick={() => onSelect(p.id)}
+              key={p.db_no}
+              onClick={() => onSelect(p.db_no)}
               style={{
                 padding: "16px",
                 border: "1px solid #ddd",

@@ -18,6 +18,6 @@ import type {
 
 export const api = {
   listPresentations: () => fetchJson<PresentationSummary[]>("/api/presentations"),
-  getPresentation: (id: number) => fetchJson<PresentationDetail>(`/api/presentations/${id}`),
+  getPresentation: (dbNo: number) => fetchJson<PresentationDetail>(`/api/presentations/${dbNo}`),
   getSlide: (id: number) => fetchJson<SlideData>(`/api/slides/${id}`),
 };

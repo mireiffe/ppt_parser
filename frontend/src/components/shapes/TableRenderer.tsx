@@ -22,6 +22,20 @@ export default function TableRenderer({ shape, style }: Props) {
     grid[cell.row_idx][cell.col_idx] = cell;
   }
 
+  // Build set of positions covered by merge spans (not the origin itself)
+  const coveredByMerge = new Set<string>();
+  for (const cell of table.cells) {
+    if (cell.is_merge_origin && (cell.row_span > 1 || cell.col_span > 1)) {
+      for (let r = cell.row_idx; r < cell.row_idx + cell.row_span; r++) {
+        for (let c = cell.col_idx; c < cell.col_idx + cell.col_span; c++) {
+          if (r !== cell.row_idx || c !== cell.col_idx) {
+            coveredByMerge.add(`${r},${c}`);
+          }
+        }
+      }
+    }
+  }
+
   return (
     <div style={style}>
       <table
@@ -42,7 +56,8 @@ export default function TableRenderer({ shape, style }: Props) {
             <tr key={rowIdx} style={{ height: `${emuToPx(table.row_heights[rowIdx])}px` }}>
               {Array.from({ length: table.num_cols }, (_, colIdx) => {
                 const cell = grid[rowIdx][colIdx];
-                if (!cell || !cell.is_merge_origin) return null;
+                // Skip cells covered by a merge span, or missing cells
+                if (!cell || coveredByMerge.has(`${rowIdx},${colIdx}`)) return null;
 
                 const cellStyle: CSSProperties = {
                   verticalAlign:

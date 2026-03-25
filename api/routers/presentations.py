@@ -3,7 +3,7 @@
 import tempfile
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 
 from ..database import get_db
 
@@ -14,30 +14,30 @@ router = APIRouter(prefix="/api/presentations", tags=["presentations"])
 def list_presentations():
     with get_db() as conn:
         rows = conn.execute("""
-            SELECT p.id, p.filename, p.slide_width, p.slide_height,
-                   (SELECT COUNT(*) FROM slides s WHERE s.presentation_id = p.id) as slide_count
+            SELECT p.db_no, p.filename, p.slide_width, p.slide_height,
+                   (SELECT COUNT(*) FROM slides s WHERE s.presentation_id = p.db_no) as slide_count
             FROM presentations p
-            ORDER BY p.id
+            ORDER BY p.db_no
         """).fetchall()
         return [dict(r) for r in rows]
 
 
-@router.get("/{pres_id}")
-def get_presentation(pres_id: int):
+@router.get("/{db_no}")
+def get_presentation(db_no: int):
     with get_db() as conn:
         pres = conn.execute(
-            "SELECT * FROM presentations WHERE id = ?", (pres_id,)
+            "SELECT * FROM presentations WHERE db_no = ?", (db_no,)
         ).fetchone()
         if not pres:
             raise HTTPException(404, "Presentation not found")
 
         theme = conn.execute(
-            "SELECT * FROM themes WHERE presentation_id = ?", (pres_id,)
+            "SELECT * FROM themes WHERE presentation_id = ?", (db_no,)
         ).fetchone()
 
         slides = conn.execute(
             "SELECT id, slide_number, name FROM slides WHERE presentation_id = ? ORDER BY slide_number",
-            (pres_id,)
+            (db_no,)
         ).fetchall()
 
         return {
@@ -48,7 +48,7 @@ def get_presentation(pres_id: int):
 
 
 @router.post("/upload")
-async def upload_presentation(file: UploadFile = File(...)):
+async def upload_presentation(file: UploadFile = File(...), db_no: int = Form(...)):
     if not file.filename or not file.filename.endswith(".pptx"):
         raise HTTPException(400, "Only .pptx files are accepted")
 
@@ -60,7 +60,7 @@ async def upload_presentation(file: UploadFile = File(...)):
     try:
         from parser.cli import parse_pptx
         from ..database import _db_path
-        parse_pptx(tmp_path, _db_path)
+        parse_pptx(tmp_path, _db_path, db_no=db_no)
         return {"message": f"Parsed {file.filename} successfully"}
     except Exception as e:
         raise HTTPException(500, f"Parse error: {e}")

@@ -6,6 +6,7 @@ import PictureRenderer from "./PictureRenderer";
 import TableRenderer from "./TableRenderer";
 import GroupRenderer from "./GroupRenderer";
 import ConnectorRenderer from "./ConnectorRenderer";
+import ChartRenderer from "./ChartRenderer";
 import type { CSSProperties } from "react";
 
 interface Props {
@@ -39,6 +40,8 @@ export default function ShapeRenderer({ shape }: Props) {
       return <AutoShapeRenderer shape={shape} style={style} />;
     case "picture":
       return <PictureRenderer shape={shape} style={style} />;
+    case "chart":
+      return <ChartRenderer shape={shape} style={style} />;
     case "table":
       return <TableRenderer shape={shape} style={style} />;
     case "group":
