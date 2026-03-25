@@ -15,5 +15,8 @@ dependencies = [
     "numpy>=2.2.6",
 ]
 
+[tool.setuptools.packages.find]
+include = ["parser*", "api*"]
+
 [project.scripts]
 ppt-parse = "parser.cli:main"
